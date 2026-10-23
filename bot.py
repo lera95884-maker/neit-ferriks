@@ -6,6 +6,8 @@ import threading
 import html
 import urllib.parse
 import os
+import http.server
+import socketserver
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -1273,6 +1275,17 @@ async def echo(message: types.Message):
         return
     if message.chat.type in ("group", "supergroup"): return
     await message.answer("🤔 Напиши <code>меню</code>", parse_mode="HTML")
+
+# --- КОСТЫЛЬ ДЛЯ RENDER ---
+def run_dummy_server():
+    PORT = 8080
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print(f"Веб-сервер запущен на порту {PORT}")
+        httpd.serve_forever()
+
+threading.Thread(target=run_dummy_server, daemon=True).start()
+# ---------------------------
 
 async def main():
     print("Бот запущен! Премиум-эмодзи активны.")
