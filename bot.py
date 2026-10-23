@@ -2110,7 +2110,7 @@ async def echo(message: types.Message):
     await message.answer("🤔 Напиши <code>меню</code>", parse_mode="HTML")
 
 async def main():
-    print("Бот запущен!")
+    print("Бот запущен!") 
     await dp.start_polling(bot)
 
 asyncio.run(main())
