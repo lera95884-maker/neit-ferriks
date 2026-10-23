@@ -6,7 +6,7 @@ import threading
 import html
 import urllib.parse
 import os
-import base64
+import zipfile
 import http.server
 import socketserver
 from aiogram import Bot, Dispatcher, types
@@ -128,15 +128,13 @@ def fmt(n):
         return str(n)
     return f"{n:,}".replace(",", ".")
 
-# ============ ВОССТАНОВЛЕНИЕ БАЗЫ ИЗ TXT ============
-if os.path.exists("users_db.txt") and not os.path.exists("users.db"):
+# ============ РАСПАКОВКА БАЗЫ ИЗ ZIP ============
+if os.path.exists("users.zip") and not os.path.exists("users.db"):
     try:
-        with open("users_db.txt", "r", encoding="utf-8") as f:
-            b64_data = f.read()
-        with open("users.db", "wb") as f:
-            f.write(base64.b64decode(b64_data))
-    except Exception:
-        pass
+        with zipfile.ZipFile("users.zip", 'r') as zip_ref:
+            zip_ref.extractall(".")
+    except Exception as e:
+        print(f"Ошибка распаковки базы: {e}")
 
 # ============ БАЗА ============
 db = sqlite3.connect("users.db", check_same_thread=False)
@@ -231,7 +229,6 @@ cursor.execute("""
 """)
 db.commit()
 
-# Миграции
 for col_sql in [
     "ALTER TABLE users ADD COLUMN rating INTEGER DEFAULT 0",
     "ALTER TABLE users ADD COLUMN custom_avatar_file_id TEXT DEFAULT NULL",
