@@ -6,8 +6,7 @@ import threading
 import html
 import urllib.parse
 import os
-import http.server
-import socketserver
+import base64
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -131,6 +130,16 @@ def fmt(n):
     return f"{n:,}".replace(",", ".")
 
 # ============ БАЗА ============
+# КОСТЫЛЬ ДЛЯ ВОССТАНОВЛЕНИЯ БАЗЫ НА RENDER
+if os.path.exists("users_db.txt") and not os.path.exists("users.db"):
+    try:
+        with open("users_db.txt", "r", encoding="utf-8") as f:
+            b64_data = f.read()
+        with open("users.db", "wb") as f:
+            f.write(base64.b64decode(b64_data))
+    except Exception as e:
+        print(f"Ошибка восстановления базы: {e}")
+
 db = sqlite3.connect("users.db", check_same_thread=False)
 cursor = db.cursor()
 db_lock = threading.Lock()
@@ -1257,6 +1266,19 @@ async def profile_cmd(message: types.Message):
 # ОСТАЛЬНЫЕ КОМАНДЫ ОСТАЛИСЬ ПРЕЖНИМИ (ПИТОМЦЫ, БИЗНЕС, КАЗИНО, АДМИНКА, САЙТ)
 # Вставь их сюда из своего предыдущего кода...
 
+# --- КОСТЫЛЬ ДЛЯ RENDER (чтобы не выдавал ошибку портов) ---
+import http.server
+import socketserver
+
+def run_dummy_server():
+    PORT = 8080
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        httpd.serve_forever()
+
+threading.Thread(target=run_dummy_server, daemon=True).start()
+# -----------------------------------------------------------
+
 @dp.message()
 async def echo(message: types.Message):
     if not message.text: return
@@ -1275,17 +1297,6 @@ async def echo(message: types.Message):
         return
     if message.chat.type in ("group", "supergroup"): return
     await message.answer("🤔 Напиши <code>меню</code>", parse_mode="HTML")
-
-# --- КОСТЫЛЬ ДЛЯ RENDER ---
-def run_dummy_server():
-    PORT = 8080
-    Handler = http.server.SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        print(f"Веб-сервер запущен на порту {PORT}")
-        httpd.serve_forever()
-
-threading.Thread(target=run_dummy_server, daemon=True).start()
-# ---------------------------
 
 async def main():
     print("Бот запущен! Премиум-эмодзи активны.")
