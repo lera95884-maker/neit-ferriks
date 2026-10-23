@@ -7,6 +7,8 @@ import html
 import urllib.parse
 import os
 import base64
+import http.server
+import socketserver
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -42,8 +44,7 @@ def sync_to_supabase(user_id):
     except Exception:
         pass
 
-# ==================================
-
+# ============ ТОКЕН ============
 TOKEN = "8957645798:AAE0CExSEJk0jHoBkdc3LTVUHBFwucrx2yA"
 ADMIN_ID = 1791177759
 AWARD_PRICE = 100
@@ -63,10 +64,9 @@ MAX_LEVEL = 1000
 FARM_COOLDOWN = 60 * 60
 FARM_MIN = 10
 FARM_MAX = 200
-
 BOT_BIRTHDAY = time.mktime(time.strptime("2026-09-22", "%Y-%m-%d"))
 
-# ============ ПРЕМИУМ ЭМОДЗИ (ID) ============
+# ============ ПРЕМИУМ ЭМОДЗИ ============
 PE_PROFILE = "5258515188490984344"
 PE_NICK = "5235612653342177821"
 PE_AVATAR = "5438416430624175981"
@@ -86,7 +86,6 @@ PE_GIFT = "5893406892092297627"
 PE_HEART = "5893406892092297627"
 PE_BEAR = "5258056932660367858"
 PE_AWARDS = "5440539497383087970"
-# ===========================================
 
 # ============ VIP СИСТЕМА ============
 VIP_LEVELS = {
@@ -129,17 +128,17 @@ def fmt(n):
         return str(n)
     return f"{n:,}".replace(",", ".")
 
-# ============ БАЗА ============
-# КОСТЫЛЬ ДЛЯ ВОССТАНОВЛЕНИЯ БАЗЫ НА RENDER
+# ============ ВОССТАНОВЛЕНИЕ БАЗЫ ИЗ TXT ============
 if os.path.exists("users_db.txt") and not os.path.exists("users.db"):
     try:
         with open("users_db.txt", "r", encoding="utf-8") as f:
             b64_data = f.read()
         with open("users.db", "wb") as f:
             f.write(base64.b64decode(b64_data))
-    except Exception as e:
-        print(f"Ошибка восстановления базы: {e}")
+    except Exception:
+        pass
 
+# ============ БАЗА ============
 db = sqlite3.connect("users.db", check_same_thread=False)
 cursor = db.cursor()
 db_lock = threading.Lock()
@@ -199,27 +198,6 @@ cursor.execute("""
 """)
 db.commit()
 
-# МИГРАЦИЯ СТАРЫХ ТАБЛИЦ
-try:
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='business'")
-    if cursor.fetchone():
-        cursor.execute("SELECT user_id, level, leaves, tax_debt, last_salary, last_tax, last_leaf FROM business")
-        for b in cursor.fetchall():
-            cursor.execute("INSERT INTO businesses_v2 (user_id, level, leaves, tax_debt, last_salary, last_tax, last_leaf) VALUES (?, ?, ?, ?, ?, ?, ?)", b)
-        cursor.execute("DROP TABLE business")
-        db.commit()
-except: pass
-
-try:
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pets'")
-    if cursor.fetchone():
-        cursor.execute("SELECT user_id, pet_type, pet_name, love, trust, hunger, born_at, last_feed, last_pet, last_play, last_hunger_update FROM pets")
-        for p in cursor.fetchall():
-            cursor.execute("INSERT INTO pets_v2 (user_id, pet_type, pet_name, love, trust, hunger, born_at, last_feed, last_pet, last_play, last_hunger_update) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", p)
-        cursor.execute("DROP TABLE pets")
-        db.commit()
-except: pass
-
 cursor.execute("""
     CREATE TABLE IF NOT EXISTS gifts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -253,6 +231,7 @@ cursor.execute("""
 """)
 db.commit()
 
+# Миграции
 for col_sql in [
     "ALTER TABLE users ADD COLUMN rating INTEGER DEFAULT 0",
     "ALTER TABLE users ADD COLUMN custom_avatar_file_id TEXT DEFAULT NULL",
@@ -711,7 +690,7 @@ def count_users_above_rating(rating):
         cursor.execute("SELECT COUNT(*) FROM users WHERE rating > ?", (rating,))
         return cursor.fetchone()[0]
 
-# ============ БОТ ============
+# ============ ЗАПУСК БОТА ============
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
@@ -721,7 +700,6 @@ waiting_for_photo = set()
 async def banned_handler(message: types.Message):
     return
 
-# ============ ВОЗРАСТ БОТА ============
 @dp.message(lambda m: m.text and m.text.lower().strip() in ("возраст", "о боте", "инфо", "информация"))
 async def age_cmd(message: types.Message):
     now = time.time()
@@ -818,7 +796,6 @@ async def photo_handler(message: types.Message):
     waiting_for_photo.discard(uid)
     await message.answer("✅ Аватарка профиля поставлена!")
 
-# ============ ФАРМ И VIP ============
 @dp.message(lambda m: m.text and m.text.lower().strip() in ("фарм", "фармить", "нейткоины"))
 async def farm_cmd(message: types.Message):
     uid = message.from_user.id
@@ -898,7 +875,6 @@ async def buy_vip_cmd(message: types.Message):
                          f"Теперь твоя зарплата бизнеса увеличена на <b>+{data['bonus']}%</b>!\n"
                          f'<tg-emoji emoji-id="{PE_NEITCOINS}">💎</tg-emoji> Осталось Нейткоинов: <b>{get_user(uid)["neitcoins"]}</b>', parse_mode="HTML")
 
-# ============ ПОДАРКИ ============
 @dp.message(lambda m: m.text and m.text.lower().strip() in ("подарки", "магазин подарков"))
 async def gifts_cmd(message: types.Message):
     uid = message.from_user.id
@@ -1077,7 +1053,6 @@ async def sell_gift_cmd(message: types.Message):
         parse_mode="HTML"
     )
 
-# ============ ЗАПИСКИ К ПОДАРКАМ ============
 @dp.message(lambda m: m.text and m.text.lower().strip() in ("записки", "мои записки"))
 async def my_notes_cmd(message: types.Message):
     uid = message.from_user.id
@@ -1143,7 +1118,6 @@ async def delete_note_cmd(message: types.Message):
         parse_mode="HTML"
     )
 
-# ============ ПРОФИЛЬ ============
 @dp.message(lambda m: m.text and m.text.lower().strip() in ("я", "профиль", "акк", "аккаунт"))
 async def profile_cmd(message: types.Message):
     uid = message.from_user.id
@@ -1263,21 +1237,484 @@ async def profile_cmd(message: types.Message):
             pass
     await message.answer(text, parse_mode="HTML")
 
-# ОСТАЛЬНЫЕ КОМАНДЫ ОСТАЛИСЬ ПРЕЖНИМИ (ПИТОМЦЫ, БИЗНЕС, КАЗИНО, АДМИНКА, САЙТ)
-# Вставь их сюда из своего предыдущего кода...
+@dp.message(lambda m: m.text and m.text.lower().strip() in ("питомцы", "приют"))
+async def pets_shelter_cmd(message: types.Message):
+    uid = message.from_user.id
+    u = get_user(uid, message.from_user.first_name or "Игрок")
+    pets = get_user_pets(uid)
+    max_pets = MAX_PETS_LIMITS.get(u["vip_level"], 1)
+    if len(pets) >= max_pets:
+        if u["vip_level"] >= 4:
+             await message.answer(f"🏠 <b>ПРИЮТ ПИТОМЦЕВ</b>\n\nУ тебя уже максимум питомцев ({len(pets)}/{max_pets}).\nНо у тебя есть VIP Платина/Бриллиант! Ты можешь сдать питомца в приют, чтобы освободить место.\n\n💡 Напиши <code>питомцы</code> и выбери питомца, чтобы сдать его.", reply_markup=pets_list_inline(uid), parse_mode="HTML")
+        else:
+            await message.answer(f"🏠 <b>ПРИЮТ ПИТОМЦЕВ</b>\n\nУ тебя уже максимум питомцев ({len(pets)}/{max_pets}).\nЧтобы завести больше, купи VIP Серебро (2 питомца) или Бриллиант (6 питомцев).", parse_mode="HTML")
+        return
+    text = f"🏠 <b>ПРИЮТ ПИТОМЦЕВ</b>\n━━━━━━━━━━━━━━━━\n\nТвои питомцы: <b>{len(pets)}/{max_pets}</b>\n\nВыбери себе друга:\n\n"
+    for key, info in PET_PETS.items():
+        text += f"{info['emoji']} <b>{info['name']}</b> — {info['desc']}\n"
+    text += "\n💡 Выбери кнопкой ниже — бесплатно!"
+    await message.answer(text, reply_markup=pet_choose_inline(uid), parse_mode="HTML")
 
-# --- КОСТЫЛЬ ДЛЯ RENDER (чтобы не выдавал ошибку портов) ---
-import http.server
-import socketserver
+@dp.message(lambda m: m.text and m.text.lower().strip() == "питомец")
+async def my_pets_cmd(message: types.Message):
+    uid = message.from_user.id
+    get_user(uid, message.from_user.first_name or "Игрок")
+    pets = get_user_pets(uid)
+    if not pets:
+        await message.answer("❌ У тебя нет питомцев!\n\n🏠 Напиши <code>питомцы</code> чтоб зайти в приют", parse_mode="HTML")
+        return
+    await message.answer("🐾 <b>ТВОИ ПИТОМЦЫ</b>\nВыбери питомца:", reply_markup=pets_list_inline(uid), parse_mode="HTML")
 
-def run_dummy_server():
-    PORT = 8080
-    Handler = http.server.SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        httpd.serve_forever()
+@dp.callback_query(lambda c: c.data.startswith("pet_pick_"))
+async def pet_pick_callback(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    u = get_user(uid, callback.from_user.first_name or "Игрок")
+    pet_type = callback.data[9:]
+    max_pets = MAX_PETS_LIMITS.get(u["vip_level"], 1)
+    pets = get_user_pets(uid)
+    if len(pets) >= max_pets:
+        try: await callback.answer(f"❌ У тебя максимум питомцев ({max_pets}). Купи VIP.", show_alert=True)
+        except: pass
+        return
+    if pet_type not in PET_PETS:
+        try: await callback.answer("❌ Неизвестный питомец")
+        except: pass
+        return
+    info = PET_PETS[pet_type]
+    create_pet(uid, pet_type, info["name"])
+    try: await callback.answer(f"✅ {info['emoji']} {info['name']} теперь твой!")
+    except: pass
+    try: await callback.message.edit_text(f"✅ Ты выбрал: {info['emoji']} <b>{info['name']}</b>\n\n📛 Имя питомца: <b>{info['name']}</b>\n💡 Чтобы дать своё имя — напиши <code>назвать питомца {info['name']} НовоеИмя</code>\n\nНапиши <code>питомцы</code> чтобы посмотреть всех.", parse_mode="HTML")
+    except: pass
 
-threading.Thread(target=run_dummy_server, daemon=True).start()
-# -----------------------------------------------------------
+@dp.callback_query(lambda c: c.data.startswith("mypet_"))
+async def mypet_callback(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    pet_id = int(callback.data[6:])
+    pet = get_pet(pet_id)
+    if not pet or pet["user_id"] != uid:
+        try: await callback.answer("❌ Ошибка")
+        except: pass
+        return
+    update_pet_hunger(pet)
+    pet = get_pet(pet_id)
+    text = build_pet_text(pet)
+    u = get_user(uid)
+    kb = pet_inline(pet_id)
+    if u["vip_level"] >= 4:
+        kb.inline_keyboard.append([InlineKeyboardButton(text="🚪 Сдать в приют", callback_data=f"pet_drop_{pet_id}")])
+    try: await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except: pass
+
+@dp.callback_query(lambda c: c.data.startswith("pet_drop_"))
+async def pet_drop_callback(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    pet_id = int(callback.data[9:])
+    pet = get_pet(pet_id)
+    u = get_user(uid)
+    if not pet or pet["user_id"] != uid:
+        try: await callback.answer("❌ Ошибка")
+        except: pass
+        return
+    if u["vip_level"] < 4:
+        try: await callback.answer("❌ Нужен VIP Платина+", show_alert=True)
+        except: pass
+        return
+    delete_pet(pet_id)
+    try: await callback.answer(f"✅ {pet['pet_name']} сдан в приют!")
+    except: pass
+    try: await callback.message.edit_text(f"✅ Питомец <b>{html.escape(pet['pet_name'])}</b> сдан в приют.\nТы можешь завести нового!", parse_mode="HTML")
+    except: pass
+
+def check_pet_cooldown(pet, field, cooldown):
+    now = time.time()
+    if now - pet[field] < cooldown:
+        return int(cooldown - (now - pet[field]))
+    return 0
+
+@dp.callback_query(lambda c: c.data.startswith("pet_feed_"))
+async def pet_feed_callback(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    pet_id = int(callback.data[9:])
+    pet = get_pet(pet_id)
+    if not pet or pet["user_id"] != uid:
+        try: await callback.answer("❌ Ошибка")
+        except: pass
+        return
+    rem = check_pet_cooldown(pet, "last_feed", PET_INTERACT_COOLDOWN)
+    if rem > 0:
+        try: await callback.answer(f"⏳ Через {rem//60} мин", show_alert=True)
+        except: pass
+        return
+    now = time.time()
+    upd_pet(pet_id, "last_feed", now)
+    inc_pet(pet_id, "hunger", 40)
+    inc_pet(pet_id, "love", 5)
+    inc_pet(pet_id, "trust", 3)
+    pet = get_pet(pet_id)
+    if pet["hunger"] > 100: upd_pet(pet_id, "hunger", 100)
+    if pet["love"] > 100: upd_pet(pet_id, "love", 100)
+    if pet["trust"] > 100: upd_pet(pet_id, "trust", 100)
+    try: await callback.answer(f"🍖 {PET_PETS.get(pet['pet_type'], {'emoji': '🐾'})['emoji']} доволен!")
+    except: pass
+    pet = get_pet(pet_id)
+    text = build_pet_text(pet)
+    kb = pet_inline(pet_id)
+    if get_user(uid)["vip_level"] >= 4: kb.inline_keyboard.append([InlineKeyboardButton(text="🚪 Сдать в приют", callback_data=f"pet_drop_{pet_id}")])
+    try: await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except: pass
+
+@dp.callback_query(lambda c: c.data.startswith("pet_pet_"))
+async def pet_pet_callback(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    pet_id = int(callback.data[8:])
+    pet = get_pet(pet_id)
+    if not pet or pet["user_id"] != uid:
+        try: await callback.answer("❌ Ошибка")
+        except: pass
+        return
+    rem = check_pet_cooldown(pet, "last_pet", PET_INTERACT_COOLDOWN)
+    if rem > 0:
+        try: await callback.answer(f"⏳ Через {rem//60} мин", show_alert=True)
+        except: pass
+        return
+    now = time.time()
+    upd_pet(pet_id, "last_pet", now)
+    inc_pet(pet_id, "love", 3)
+    inc_pet(pet_id, "trust", 5)
+    pet = get_pet(pet_id)
+    if pet["love"] > 100: upd_pet(pet_id, "love", 100)
+    if pet["trust"] > 100: upd_pet(pet_id, "trust", 100)
+    try: await callback.answer(f"🤚 {PET_PETS.get(pet['pet_type'], {'emoji': '🐾'})['emoji']} мурлычет!")
+    except: pass
+    pet = get_pet(pet_id)
+    text = build_pet_text(pet)
+    kb = pet_inline(pet_id)
+    if get_user(uid)["vip_level"] >= 4: kb.inline_keyboard.append([InlineKeyboardButton(text="🚪 Сдать в приют", callback_data=f"pet_drop_{pet_id}")])
+    try: await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except: pass
+
+@dp.callback_query(lambda c: c.data.startswith("pet_play_"))
+async def pet_play_callback(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    pet_id = int(callback.data[9:])
+    pet = get_pet(pet_id)
+    if not pet or pet["user_id"] != uid:
+        try: await callback.answer("❌ Ошибка")
+        except: pass
+        return
+    rem = check_pet_cooldown(pet, "last_play", PET_INTERACT_COOLDOWN)
+    if rem > 0:
+        try: await callback.answer(f"⏳ Через {rem//60} мин", show_alert=True)
+        except: pass
+        return
+    now = time.time()
+    upd_pet(pet_id, "last_play", now)
+    inc_pet(pet_id, "love", 7)
+    inc_pet(pet_id, "trust", 7)
+    pet = get_pet(pet_id)
+    if pet["love"] > 100: upd_pet(pet_id, "love", 100)
+    if pet["trust"] > 100: upd_pet(pet_id, "trust", 100)
+    try: await callback.answer(f"🎾 {PET_PETS.get(pet['pet_type'], {'emoji': '🐾'})['emoji']} весело играет!")
+    except: pass
+    pet = get_pet(pet_id)
+    text = build_pet_text(pet)
+    kb = pet_inline(pet_id)
+    if get_user(uid)["vip_level"] >= 4: kb.inline_keyboard.append([InlineKeyboardButton(text="🚪 Сдать в приют", callback_data=f"pet_drop_{pet_id}")])
+    try: await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except: pass
+
+@dp.message(lambda m: m.text and m.text.lower().startswith("назвать питомца "))
+async def pet_rename_cmd(message: types.Message):
+    uid = message.from_user.id
+    parts = message.text[16:].strip().split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Использование: <code>назвать питомца СтароеИмя НовоеИмя</code>")
+        return
+    old_name, new_name = parts[0].strip(), parts[1].strip()
+    if len(new_name) < 1 or len(new_name) > 20:
+        await message.answer("❌ Имя 1-20 символов")
+        return
+    for p in get_user_pets(uid):
+        if p["pet_name"].lower() == old_name.lower():
+            upd_pet(p["id"], "pet_name", new_name)
+            info = PET_PETS.get(p["pet_type"], {"emoji": "🐾"})
+            await message.answer(f"{info['emoji']} Питомца зовут: <b>{html.escape(new_name)}</b>", parse_mode="HTML")
+            return
+    await message.answer(f"❌ Питомец с именем '{html.escape(old_name)}' не найден.")
+
+def build_business_text(biz):
+    check_result = check_and_apply_salary(biz)
+    biz = get_business(biz["id"])
+    salary_per_hour = get_business_salary(biz["level"])
+    u = get_user(biz["user_id"])
+    if u["vip_level"] in VIP_LEVELS:
+        salary_per_hour = int(salary_per_hour * (1 + VIP_LEVELS[u["vip_level"]]["bonus"] / 100.0))
+    pet_bonus_count = 0
+    for p in get_user_pets(biz["user_id"]):
+        if p["love"] >= 50 and pet_bonus_count < 2:
+            salary_per_hour = int(salary_per_hour * 1.10)
+            pet_bonus_count += 1
+    leaves_to_next = LEAVES_PER_LEVEL - (biz["leaves"] % LEAVES_PER_LEVEL)
+    leaves_info = "🔝 <b>Максимум!</b>" if biz["level"] >= MAX_LEVEL else f"📈 До след. уровня: <b>{leaves_to_next}</b> 🍃"
+    now = time.time()
+    sec_salary = max(0, int(BUSINESS_SALARY_COOLDOWN - (now - biz["last_salary"])))
+    sec_tax = max(0, int(BUSINESS_TAX_COOLDOWN - (now - biz["last_tax"])))
+    sec_leaf = max(0, int(LEAF_COOLDOWN - (now - biz["last_leaf"])))
+    def time_str(sec):
+        h, m = sec // 3600, (sec % 3600) // 60
+        return f"{h}ч {m}мин" if h > 0 else f"{m}мин"
+    text = f"💼 <b>БИЗНЕС #{biz['id']}</b>\n━━━━━━━━━━━━━━━━\n\n📊 Уровень: <b>{biz['level']}</b> / {MAX_LEVEL}\n💰 Зарплата: <b>{fmt(salary_per_hour)}</b>/час\n"
+    if biz["tax_debt"] > 0:
+        text += f"🚨 НАЛОГИ (долг): <b>{fmt(biz['tax_debt'])}</b>💰\n⚠️ <b>Зарплата заблокирована до оплаты!</b>\n\n"
+    else:
+        text += f"✅ Налоги: оплачены\n\n"
+    text += f"🍃 Листочки: <b>{biz['leaves']}</b>\n{leaves_info}\n\n⏰ Следующая зарплата: <b>{time_str(sec_salary)}</b>\n💸 Следующий налог: <b>{time_str(sec_tax)}</b> (+{fmt(BUSINESS_TAX)})\n🍃 Листочки через: <b>{time_str(sec_leaf)}</b>"
+    extra = None
+    if check_result:
+        if check_result["salary"] > 0: extra = f"💰 Начислена зарплата: <b>+{fmt(check_result['salary'])}</b>"
+        elif check_result["salary"] == -1: extra = "🚫 Зарплата не начислена — есть долг по налогам!"
+        if check_result["tax_added"] > 0: extra = (extra + f"\n💸 Начислен налог: <b>+{fmt(check_result['tax_added'])}</b>") if extra else f"💸 Начислен налог: <b>+{fmt(check_result['tax_added'])}</b>"
+    return text, extra
+
+def business_inline(biz_id):
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🍃 Искать листочки", callback_data=f"biz_leaf_{biz_id}"), InlineKeyboardButton(text="⬆️ Прокачать", callback_data=f"biz_up_{biz_id}")], [InlineKeyboardButton(text="💸 Оплатить налоги", callback_data=f"biz_tax_{biz_id}")]])
+
+@dp.message(lambda m: m.text and m.text.lower().strip() in ("мой бизнес", "бизнес"))
+async def business_cmd(message: types.Message):
+    uid = message.from_user.id
+    businesses = get_user_businesses(uid)
+    if not businesses:
+        await message.answer(f"💼 <b>У тебя нет бизнесов!</b>\n\n💰 Цена: <b>{fmt(BUSINESS_PRICE)}</b>\n📊 Уровень: 0\n💵 Зарплата: <b>{fmt(get_business_salary(0))}</b>/час\n\nКупить: <code>купить бизнес</code>", parse_mode="HTML")
+        return
+    await message.answer("💼 <b>ТВОИ БИЗНЕСЫ</b>\nВыбери бизнес для управления:", reply_markup=biz_list_inline(uid), parse_mode="HTML")
+
+@dp.callback_query(lambda c: c.data.startswith("mybiz_"))
+async def mybiz_callback(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    biz_id = int(callback.data[6:])
+    biz = get_business(biz_id)
+    if not biz or biz["user_id"] != uid:
+        try: await callback.answer("❌ Ошибка")
+        except: pass
+        return
+    text, extra = build_business_text(biz)
+    if extra:
+        try: await callback.message.answer(extra, parse_mode="HTML")
+        except: pass
+    try: await callback.message.edit_text(text, reply_markup=business_inline(biz_id), parse_mode="HTML")
+    except: pass
+
+@dp.message(lambda m: m.text and m.text.lower().strip() in ("купить бизнес", "купить_бизнес"))
+async def buy_business_cmd(message: types.Message):
+    uid = message.from_user.id
+    u = get_user(uid, message.from_user.first_name or "Игрок")
+    if len(get_user_businesses(uid)) >= MAX_BIZ_LIMITS.get(u["vip_level"], 1):
+        await message.answer(f"❌ У тебя уже максимум бизнесов ({MAX_BIZ_LIMITS.get(u['vip_level'], 1)}).\nКупи VIP Золото (2 бизнеса) или Бриллиант.", parse_mode="HTML")
+        return
+    if u["balance"] < BUSINESS_PRICE:
+        await message.answer(f"❌ Не хватает монет.\nНужно: <b>{fmt(BUSINESS_PRICE)}</b>💰\nУ тебя: <b>{fmt(u['balance'])}</b>💰", parse_mode="HTML")
+        return
+    inc(uid, "balance", -BUSINESS_PRICE)
+    create_business(uid)
+    await message.answer(f"✅ <b>Бизнес куплен!</b>\n\n💼 Напиши <code>мой бизнес</code>", parse_mode="HTML")
+
+@dp.callback_query(lambda c: c.data.startswith("biz_leaf_"))
+async def biz_leaf_callback(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    biz_id = int(callback.data[9:])
+    biz = get_business(biz_id)
+    if not biz or biz["user_id"] != uid:
+        try: await callback.answer("❌ Ошибка")
+        except: pass
+        return
+    now = time.time()
+    if now - biz["last_leaf"] < LEAF_COOLDOWN:
+        try: await callback.answer(f"⏳ Через {int(LEAF_COOLDOWN - (now - biz['last_leaf']))//60} мин", show_alert=True)
+        except: pass
+        return
+    found = random.randint(LEAF_MIN, LEAF_MAX)
+    inc_business(biz_id, "leaves", found)
+    upd_business(biz_id, "last_leaf", now)
+    try: await callback.answer(f"🍃 +{found} листочков!", show_alert=True)
+    except: pass
+    text, extra = build_business_text(get_business(biz_id))
+    try: await callback.message.edit_text(text, reply_markup=business_inline(biz_id), parse_mode="HTML")
+    except: pass
+
+@dp.callback_query(lambda c: c.data.startswith("biz_up_"))
+async def biz_up_callback(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    biz_id = int(callback.data[7:])
+    biz = get_business(biz_id)
+    if not biz or biz["user_id"] != uid:
+        try: await callback.answer("❌ Ошибка")
+        except: pass
+        return
+    if biz["level"] >= MAX_LEVEL:
+        try: await callback.answer("🔝 Максимум!", show_alert=True)
+        except: pass
+        return
+    if biz["leaves"] < LEAVES_PER_LEVEL:
+        try: await callback.answer(f"❌ Нужно {LEAVES_PER_LEVEL} 🍃", show_alert=True)
+        except: pass
+        return
+    inc_business(biz_id, "leaves", -LEAVES_PER_LEVEL)
+    inc_business(biz_id, "level", 1)
+    try: await callback.answer(f"✅ Прокачано! Уровень {biz['level']+1}", show_alert=True)
+    except: pass
+    text, extra = build_business_text(get_business(biz_id))
+    try: await callback.message.edit_text(text, reply_markup=business_inline(biz_id), parse_mode="HTML")
+    except: pass
+
+@dp.callback_query(lambda c: c.data.startswith("biz_tax_"))
+async def biz_tax_callback(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    biz_id = int(callback.data[8:])
+    biz = get_business(biz_id)
+    u = get_user(uid)
+    if not biz or biz["user_id"] != uid:
+        try: await callback.answer("❌ Ошибка")
+        except: pass
+        return
+    if biz["tax_debt"] <= 0:
+        try: await callback.answer("✅ Долгов нет", show_alert=True)
+        except: pass
+        return
+    if u["balance"] < biz["tax_debt"]:
+        try: await callback.answer(f"❌ Нужно {fmt(biz['tax_debt'])}💰", show_alert=True)
+        except: pass
+        return
+    debt = biz["tax_debt"]
+    inc(uid, "balance", -debt)
+    upd_business(biz_id, "tax_debt", 0)
+    upd_business(biz_id, "last_tax", time.time())
+    try: await callback.answer(f"✅ Оплачено {fmt(debt)}💰", show_alert=True)
+    except: pass
+    text, extra = build_business_text(get_business(biz_id))
+    try: await callback.message.edit_text(text, reply_markup=business_inline(biz_id), parse_mode="HTML")
+    except: pass
+
+@dp.message(lambda m: m.text and m.text.lower().strip() in ("аватарка", "своя аватарка", "моя аватарка"))
+async def custom_avatar_cmd(message: types.Message):
+    u = get_user(message.from_user.id)
+    uid = message.from_user.id
+    if uid == ADMIN_ID or u["custom_avatar_allowed"]:
+        waiting_for_photo.add(uid)
+        await message.answer("📸 Отправь мне фото — поставлю как аватарку.\n\n(Жду фото...)")
+    else:
+        await message.answer("❌ Нет права. Купи <code>своя_аватарка</code> (500💰)", parse_mode="HTML")
+
+@dp.message(lambda m: m.text and m.text.lower().strip() in ("награды", "мои награды"))
+async def my_awards_cmd(message: types.Message):
+    awards = get_awards(message.from_user.id)
+    if not awards:
+        await message.answer(f'<tg-emoji emoji-id="{PE_AWARDS}">🏅</tg-emoji> У тебя пока нет наград 😢', parse_mode="HTML")
+        return
+    text = f'<tg-emoji emoji-id="{PE_AWARDS}">🏅</tg-emoji> <b>ТВОИ НАГРАДЫ</b> ({len(awards)})\n━━━━━━━━━━━━━━━━\n'
+    for _, award in awards:
+        text += f"🎖 {html.escape(award)}\n"
+    await message.answer(text, parse_mode="HTML")
+
+@dp.message(lambda m: m.text and m.text.lower().strip() in ("баланс", "монеты", "деньги", "кошелёк", "кошелек"))
+async def balance_cmd(message: types.Message):
+    u = get_user(message.from_user.id)
+    await message.answer(f'<tg-emoji emoji-id="{PE_BALANCE}">💰</tg-emoji> <b>ТВОЙ БАЛАНС</b>\n━━━━━━━━━━━━━━━━\n<tg-emoji emoji-id="{PE_BALANCE}">🪙</tg-emoji> <b>{fmt(u["balance"])}</b> монет\n<tg-emoji emoji-id="{PE_NEITCOINS}">💎</tg-emoji> <b>{u["neitcoins"]}</b> Нейткоинов', parse_mode="HTML")
+
+@dp.message(lambda m: m.text and m.text.lower().strip() in ("рейтинг", "реп", "rating"))
+async def rating_cmd(message: types.Message):
+    u = get_user(message.from_user.id)
+    place = count_users_above_rating(u["rating"]) + 1
+    rank = get_rank(u["rating"])
+    await message.answer(f'<tg-emoji emoji-id="{PE_TOP_PLACE}">⭐</tg-emoji> <b>ТВОЙ РЕЙТИНГ</b>\n━━━━━━━━━━━━━━━━\n<tg-emoji emoji-id="{PE_TOP_PLACE}">⭐</tg-emoji> Рейтинг: <b>{fmt(u["rating"])}</b>\n<tg-emoji emoji-id="{PE_RANK}">🎖</tg-emoji> Ранг: <b>{rank}</b>\n🏆 Место: <b>#{place}</b>\n\n📈 Повысить: <code>рейтинг повысить Сумма</code>\n💸 Продать: <code>рейтинг продать Сумма</code> (или <code>все</code>)', parse_mode="HTML")
+
+@dp.message(lambda m: m.text and m.text.lower().startswith("ник "))
+async def setname_cmd(message: types.Message):
+    new_nick = message.text[4:].strip()
+    if len(new_nick) < 2 or len(new_nick) > 20:
+        await message.answer("❌ 2-20"); return
+    if find_user_by_nick(new_nick):
+        await message.answer("❌ Занят"); return
+    get_user(message.from_user.id)
+    upd(message.from_user.id, "nickname", new_nick)
+    await message.answer(f"✅ Ник: <b>{html.escape(new_nick)}</b>", parse_mode="HTML")
+
+@dp.message(lambda m: m.text and m.text.lower().strip() in ("бонус", "дейли", "награда", "ежедневно"))
+async def daily_cmd(message: types.Message):
+    u = get_user(message.from_user.id, message.from_user.first_name or "Игрок")
+    now = time.time()
+    if now - u["last_daily"] < 24 * 60 * 60:
+        rem = int(24 * 60 * 60 - (now - u["last_daily"]))
+        await message.answer(f"⏳ Через <b>{rem//3600}ч {(rem%3600)//60}мин</b>", parse_mode="HTML"); return
+    streak = u["daily_streak"] + 1 if (u["last_daily"] != 0 and now - u["last_daily"] < 48 * 3600) else 1
+    bonus = 50 + (streak - 1) * 25
+    inc(message.from_user.id, "balance", bonus)
+    inc(message.from_user.id, "total_earned", bonus)
+    upd(message.from_user.id, "last_daily", now)
+    upd(message.from_user.id, "daily_streak", streak)
+    await message.answer(f'<tg-emoji emoji-id="{PE_GIFT}">🎁</tg-emoji> +<b>{fmt(bonus)}</b>! (стрик <b>{streak}</b>)\n<tg-emoji emoji-id="{PE_BALANCE}">💰</tg-emoji> {fmt(get_user(message.from_user.id)["balance"])}', parse_mode="HTML")
+
+@dp.message(lambda m: m.text and m.text.lower().strip() in ("работа", "работать", "заработать"))
+async def work_cmd(message: types.Message):
+    u = get_user(message.from_user.id, message.from_user.first_name or "Игрок")
+    now = time.time()
+    if now - u["last_work"] < 60 * 60:
+        rem = int(60 * 60 - (now - u["last_work"]))
+        await message.answer(f"😴 <b>{rem//60}мин</b>", parse_mode="HTML"); return
+    earnings = random.randint(20, 80)
+    inc(message.from_user.id, "balance", earnings)
+    inc(message.from_user.id, "total_earned", earnings)
+    upd(message.from_user.id, "last_work", now)
+    await message.answer(f"💼 {random.choice(['программистом', 'курьером', 'дизайнером', 'стримером', 'тестировщиком'])}, +<b>{fmt(earnings)}</b>!", parse_mode="HTML")
+
+@dp.message(lambda m: m.text and m.text.lower().strip() in ("топ", "топы", "лидеры"))
+async def top_cmd(message: types.Message):
+    uid = message.from_user.id
+    get_user(uid, message.from_user.first_name or "Игрок")
+    await message.answer(build_top_rating(uid), reply_markup=top_inline("rating"), parse_mode="HTML")
+
+@dp.callback_query(lambda c: c.data in ("top_rating", "top_money"))
+async def top_callback(callback: types.CallbackQuery):
+    uid = callback.from_user.id
+    get_user(uid, callback.from_user.first_name or "Игрок")
+    text = build_top_rating(uid) if callback.data == "top_rating" else build_top_money(uid)
+    try: await callback.message.edit_text(text, reply_markup=top_inline(), parse_mode="HTML")
+    except: pass
+    try: await callback.answer()
+    except: pass
+
+@dp.message(lambda m: m.text and m.text.lower().strip() in ("сайт", "профиль на сайте", "мой сайт"))
+async def site_cmd(message: types.Message):
+    uid = message.from_user.id
+    u = get_user(uid, message.from_user.first_name or "Игрок")
+    businesses = get_user_businesses(uid)
+    pets = get_user_pets(uid)
+    base_url = "https://neit-ferriks.vercel.app" 
+    params = {"id": uid, "nick": u["nickname"], "balance": u["balance"], "rating": u["rating"], "biz": sum(b["level"] for b in businesses), "pet": ", ".join(p["pet_name"] for p in pets) if pets else "Нет", "neitcoins": u["neitcoins"]}
+    final_url = f"{base_url}/?{urllib.parse.urlencode(params)}"
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📱 Открыть профиль на сайте", url=final_url)]])
+    await message.answer(f"🌐 <b>Твой профиль на сайте!</b>\n\nНажми на кнопку ниже, чтобы открыть свою страницу.", reply_markup=kb, parse_mode="HTML")
+
+@dp.message(lambda m: m.text and m.text.lower().startswith("выдать_всем "))
+async def richall_cmd(message: types.Message):
+    if message.from_user.id != ADMIN_ID: await message.answer("⛔"); return
+    try: amount = int(message.text[12:].strip())
+    except: await message.answer("❌"); return
+    with db_lock:
+        cursor.execute("UPDATE users SET balance = balance + ?, total_earned = total_earned + ?", (amount, amount))
+        db.commit()
+    await message.answer(f"✅ По <b>{fmt(amount)}</b>", parse_mode="HTML")
+
+@dp.message(lambda m: m.text and m.text.lower().startswith("выдать "))
+async def give_cmd(message: types.Message):
+    if message.from_user.id != ADMIN_ID: await message.answer("⛔"); return
+    try: amount = int(message.text[7:].strip())
+    except: await message.answer("❌"); return
+    target = message.reply_to_message.from_user if message.reply_to_message else message.from_user
+    get_user(target.id, target.first_name or "Игрок")
+    inc(target.id, "balance", amount)
+    inc(target.id, "total_earned", amount)
+    await message.answer(f"✅ <b>{fmt(amount)}</b> → {html.escape(target.first_name)}", parse_mode="HTML")
 
 @dp.message()
 async def echo(message: types.Message):
@@ -1285,18 +1722,20 @@ async def echo(message: types.Message):
     text_lower = message.text.lower().strip()
     if text_lower.startswith("нейт"):
         u = get_user(message.from_user.id, message.from_user.first_name or "Игрок")
-        nick = u["nickname"]
-        answers = [
-            f"Привет, <b>{html.escape(nick)}</b>! Я тут! 🤖",
-            f"Ась, <b>{html.escape(nick)}</b>? Что случилось? 👀",
-            f"Я здесь, <b>{html.escape(nick)}</b>! Чем помочь? ✨",
-            f"Чего звал, <b>{html.escape(nick)}</b>? 😎",
-            f"Тут я, тут! Не кричи 😄",
-        ]
-        await message.answer(random.choice(answers), parse_mode="HTML")
+        await message.answer(random.choice([f"Привет, <b>{html.escape(u['nickname'])}</b>! Я тут! 🤖", f"Ась, <b>{html.escape(u['nickname'])}</b>? Что случилось? 👀", f"Я здесь, <b>{html.escape(u['nickname'])}</b>! Чем помочь? ✨", f"Чего звал, <b>{html.escape(u['nickname'])}</b>? 😎", f"Тут я, тут! Не кричи 😄"]), parse_mode="HTML")
         return
     if message.chat.type in ("group", "supergroup"): return
     await message.answer("🤔 Напиши <code>меню</code>", parse_mode="HTML")
+
+# --- КОСТЫЛЬ ДЛЯ RENDER ---
+def run_dummy_server():
+    PORT = 8080
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        httpd.serve_forever()
+
+threading.Thread(target=run_dummy_server, daemon=True).start()
+# ---------------------------
 
 async def main():
     print("Бот запущен! Премиум-эмодзи активны.")
